@@ -2,128 +2,95 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+[RequireComponent(typeof(Rigidbody))]
 public class control : MonoBehaviour
 {
-    [Header("Referencias")]
-    [SerializeField] private Transform cameraTransform;
-
     [Header("Movimiento")]
-    [SerializeField] private float walkSpeed = 4f;
-    [SerializeField] private float sprintSpeed = 8f;
-    [SerializeField] private float acceleration = 10f;
-    [SerializeField] private float airControl = 0.2f; // cuánto control en aire (0..1)
+    public float moveSpeed = 5f;
+    public float sprintSpeed = 8f;
+    public float jumpForce = 5f;
 
-    [Header("Salto y gravedad")]
-    [SerializeField] private float jumpHeight = 1.6f;
-    [SerializeField] private float gravity = -9.81f;
-    [SerializeField] private float terminalVelocity = -50f;
-    [SerializeField] private float groundedGraceTime = 0.15f; // pequeño leniency para saltos
+    [Header("Mouse Look")]
+    public float mouseSensitivity = 2f;
+    public float minPitch = -80f;
+    public float maxPitch = 80f;
 
-    [Header("Opciones")]
-    [SerializeField] private bool enableSprint = true;
-    [SerializeField] private KeyCode sprintKey = KeyCode.LeftShift;
+    private Rigidbody rb;
+    private Camera cam;
+    private float pitch;
+    private bool isGrounded;
 
-    private CharacterController cc;
-    private Vector3 velocity; // y incluido
-    private float currentSpeed;
-    private float lastGroundedTime = -10f;
-    private float lastJumpPressedTime = -10f;
-    private const float jumpInputGraceTime = 0.15f;
-
-    void Awake()
+    void Start()
     {
-        cc = GetComponent<CharacterController>();
-        currentSpeed = walkSpeed;
-        if (cameraTransform == null && Camera.main != null) cameraTransform = Camera.main.transform;
+        rb = GetComponent<Rigidbody>();
+        rb.freezeRotation = true; // evita que el rigidbody rote con choques
+
+        // si no hay cámara, crear una como hija
+        cam = GetComponentInChildren<Camera>();
+        if (cam == null)
+        {
+            GameObject camObj = new GameObject("PlayerCamera");
+            camObj.transform.SetParent(transform);
+            camObj.transform.localPosition = new Vector3(0, 1f, 0);
+            cam = camObj.AddComponent<Camera>();
+        }
+
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
     }
 
     void Update()
     {
-        HandleInputs();
-        HandleMovement();
-        ApplyGravityAndJump();
-        MoveCharacter();
-    }
+        // ---- Mouse look ----
+        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity;
+        float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity;
 
-    void HandleInputs()
-    {
-        // detectar último frame que el jugador estuvo en el suelo
-        if (cc.isGrounded)
-            lastGroundedTime = Time.time;
+        transform.Rotate(Vector3.up * mouseX);
 
-        // detectar salto (grace window)
-        if (Input.GetButtonDown("Jump"))
-            lastJumpPressedTime = Time.time;
-    }
+        pitch -= mouseY;
+        pitch = Mathf.Clamp(pitch, minPitch, maxPitch);
+        cam.transform.localEulerAngles = new Vector3(pitch, 0, 0);
 
-    void HandleMovement()
-    {
-        // entrada
-        float inputX = Input.GetAxisRaw("Horizontal"); // -1..1
-        float inputZ = Input.GetAxisRaw("Vertical");
-
-        Vector3 input = new Vector3(inputX, 0f, inputZ);
-        input = Vector3.ClampMagnitude(input, 1f);
-
-        // movimiento relativo a la cámara (si hay cam)
-        Vector3 moveDirection;
-        if (cameraTransform != null)
+        // ---- Salto ----
+        if (Input.GetButtonDown("Jump") && isGrounded)
         {
-            Vector3 forward = Vector3.ProjectOnPlane(cameraTransform.forward, Vector3.up).normalized;
-            Vector3 right = Vector3.ProjectOnPlane(cameraTransform.right, Vector3.up).normalized;
-            moveDirection = (forward * input.z + right * input.x).normalized;
+            rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
         }
-        else
-        {
-            // si no hay cámara, mover relativo al world
-            moveDirection = (transform.forward * input.z + transform.right * input.x).normalized;
-        }
-
-        // sprint
-        bool sprinting = enableSprint && Input.GetKey(sprintKey) && input.magnitude > 0.1f;
-        float targetSpeed = sprinting ? sprintSpeed : walkSpeed;
-
-        // suavizar velocidad con aceleración
-        float control = cc.isGrounded ? 1f : airControl;
-        currentSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, acceleration * control * Time.deltaTime);
-
-        // setear la componente horizontal de velocity hacia la dirección deseada
-        Vector3 horizontalVelocity = new Vector3(velocity.x, 0f, velocity.z);
-        Vector3 desired = moveDirection * currentSpeed;
-
-        // aplico lerp/MoveTowards para evitar cambios instantáneos
-        horizontalVelocity = Vector3.MoveTowards(horizontalVelocity, desired, acceleration * control * Time.deltaTime);
-
-        velocity.x = horizontalVelocity.x;
-        velocity.z = horizontalVelocity.z;
     }
 
-    void ApplyGravityAndJump()
+    void FixedUpdate()
     {
-        // gravedad
-        if (cc.isGrounded && velocity.y < 0f)
-            velocity.y = -2f; // pequeño empuje hacia abajo para mantener contacto
+        // ---- Movimiento con física ----
+        float x = Input.GetAxis("Horizontal");
+        float z = Input.GetAxis("Vertical");
 
-        // salto: permitimos un pequeño "grace" si se presionó poco antes de aterrizar
-        bool canJump = (Time.time - lastGroundedTime) <= groundedGraceTime;
-        bool pressedJumpRecently = (Time.time - lastJumpPressedTime) <= jumpInputGraceTime;
+        bool sprinting = Input.GetKey(KeyCode.LeftShift);
+        float speed = sprinting ? sprintSpeed : moveSpeed;
 
-        if (pressedJumpRecently && (canJump || cc.isGrounded))
-        {
-            // v = sqrt(2 * g * h) -> con g positivo
-            float g = Mathf.Abs(gravity);
-            velocity.y = Mathf.Sqrt(2f * g * jumpHeight);
-            lastJumpPressedTime = -10f; // consumir la entrada
-        }
+        Vector3 move = (transform.right * x + transform.forward * z).normalized;
+        Vector3 targetVelocity = move * speed;
 
-        // aplicar gravedad cada frame (nota: gravedad es negativa)
-        velocity.y += gravity * Time.deltaTime;
-        if (velocity.y < terminalVelocity) velocity.y = terminalVelocity;
+        Vector3 velocity = rb.velocity;
+        Vector3 velocityChange = targetVelocity - new Vector3(velocity.x, 0, velocity.z);
+
+        rb.AddForce(velocityChange, ForceMode.VelocityChange);
     }
 
-    void MoveCharacter()
+    void OnCollisionStay(Collision collision)
     {
-        Vector3 displacement = velocity * Time.deltaTime;
-        cc.Move(displacement);
+        // Si toca algo con tag "Ground" o simplemente cualquier colisión abajo
+        foreach (ContactPoint contact in collision.contacts)
+        {
+            if (Vector3.Dot(contact.normal, Vector3.up) > 0.5f)
+            {
+                isGrounded = true;
+                return;
+            }
+        }
+    }
+
+    void OnCollisionExit(Collision collision)
+    {
+        isGrounded = false;
     }
 }
