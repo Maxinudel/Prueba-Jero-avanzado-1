@@ -9,6 +9,7 @@ public class canva : MonoBehaviour
      void Start(){
          panelPerdiste.SetActive(false);
      }
+
     void OnCollisionEnter(Collision collision)
     {
         if (collision.transform.CompareTag("Player"))
