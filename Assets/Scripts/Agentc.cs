@@ -36,7 +36,7 @@ public class Agentc : MonoBehaviour
     {
 
         sees  = false;
-        if (Physics.Raycast(transform.position + Vector3.up * 0.8f, transform.forward, out RaycastHit hit, 1, visionMask))
+        if (Physics.Raycast(transform.position + Vector3.up * 0.8f, transform.forward, out RaycastHit hit, 5, visionMask))
         {
             if (hit.transform == player)
             {
@@ -77,6 +77,6 @@ public class Agentc : MonoBehaviour
     void OnDrawGizmosSelected()
     {
         Gizmos.color = Color.red;
-        Gizmos.DrawRay(transform.position + Vector3.up * 0.8f, transform.forward * 2);
+        Gizmos.DrawRay(transform.position + Vector3.up * 0.8f, transform.forward * 5);
     }
 }
